@@ -39,6 +39,10 @@ METRICS_PATTERN = re.compile(
     r'<script type="application/json" id="metrics">(.*?)</script>',
     re.DOTALL,
 )
+WARM_STATE_PATTERN = re.compile(
+    r"window\.pageLevelData\.warmStateBootstrap = (\{.*?\});",
+    re.DOTALL,
+)
 
 
 class AnchorExtractor(HTMLParser):
@@ -121,6 +125,25 @@ def extract_metrics_data(page_html: str) -> dict[str, Any]:
     return json.loads(match.group(1))
 
 
+def extract_fulfillment_config(page_html: str) -> dict[str, Any]:
+    match = WARM_STATE_PATTERN.search(page_html)
+    if not match:
+        raise ValueError("找不到 warmStateBootstrap。")
+
+    warm_state = json.loads(match.group(1))
+    default_kit = warm_state.get("defaultKit") or {}
+    options = default_kit.get("options") or {}
+    option_codes = [value for value in options.values() if isinstance(value, str) and value]
+
+    if not default_kit.get("part"):
+        raise ValueError("warmStateBootstrap 缺少 defaultKit.part。")
+
+    return {
+        "part": default_kit["part"],
+        "option_codes": option_codes,
+    }
+
+
 class PickupBrowser:
     def __init__(self) -> None:
         self._playwright = None
@@ -160,18 +183,27 @@ class PickupBrowser:
         if self._playwright is not None:
             self._playwright.stop()
 
-    def collect_pickup_entries(self, model_url: str, part_number: str) -> list[dict[str, str]]:
+    def collect_pickup_entries(
+        self,
+        model_url: str,
+        availability_part_number: str,
+        fulfillment_part: str,
+        option_codes: list[str],
+    ) -> list[dict[str, str]]:
         assert self._page is not None
         self._page.goto(model_url, wait_until="domcontentloaded")
         entries = self._page.evaluate(
             """
-            async ({ modelUrl, partNumber, fulfillmentUrl }) => {
+            async ({ availabilityPartNumber, fulfillmentPart, fulfillmentUrl, optionCodes }) => {
               const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
               const buildUrl = (storeId) => {
                 const url = new URL(fulfillmentUrl);
                 url.searchParams.set("fae", "true");
                 url.searchParams.set("little", "false");
-                url.searchParams.set("parts.0", partNumber);
+                url.searchParams.set("parts.0", fulfillmentPart);
+                if (optionCodes.length) {
+                  url.searchParams.set("option.0", optionCodes.join(","));
+                }
                 url.searchParams.set("mts.0", "regular");
                 url.searchParams.set("mts.1", "sticky");
                 url.searchParams.set("mts.2", "compact");
@@ -198,7 +230,7 @@ class PickupBrowser:
                 }
                 const store = stores[0];
                 const availabilityMap = store.partsAvailability || {};
-                let availability = availabilityMap[partNumber];
+                let availability = availabilityMap[availabilityPartNumber];
                 if (!availability) {
                   const values = Object.values(availabilityMap);
                   if (values.length === 1) {
@@ -263,9 +295,10 @@ class PickupBrowser:
             }
             """,
             {
-                "modelUrl": model_url,
-                "partNumber": part_number,
+                "availabilityPartNumber": availability_part_number,
+                "fulfillmentPart": fulfillment_part,
                 "fulfillmentUrl": FULFILLMENT_URL,
+                "optionCodes": option_codes,
             },
         )
         return entries
@@ -280,17 +313,32 @@ def collect_education_models() -> list[dict[str, Any]]:
         for model_link in model_links:
             model_html = fetch_text(model_link["url"])
             metrics = extract_metrics_data(model_html)
+            fulfillment_config = extract_fulfillment_config(model_html)
             product = metrics["data"]["products"][0]
             part_number = product["partNumber"]
+            pickup_entries: list[dict[str, str]] = []
+            pickup_error = None
+
+            try:
+                pickup_entries = pickup_browser.collect_pickup_entries(
+                    model_link["url"],
+                    part_number,
+                    fulfillment_config["part"],
+                    fulfillment_config["option_codes"],
+                )
+            except Exception as exc:
+                pickup_error = f"Apple 直營店取貨：目前無法取得資料（{exc}）"
+
             models.append(
                 {
                     "model": model_link["model"],
                     "url": model_link["url"],
                     "part_number": part_number,
+                    "fulfillment_part": fulfillment_config["part"],
+                    "option_codes": fulfillment_config["option_codes"],
                     "price": format_currency(product.get("price", {}).get("fullPrice")),
-                    "pickup_entries": pickup_browser.collect_pickup_entries(
-                        model_link["url"], part_number
-                    ),
+                    "pickup_entries": pickup_entries,
+                    "pickup_error": pickup_error,
                 }
             )
 
