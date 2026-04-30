@@ -9,15 +9,21 @@
 - `github_actions_mac_mini_monitor.py`
 - `check_mac_mini_stock.py`
 
-## 需要設定的 Secrets
+## 需要設定的 Variables 與 Secrets
 
 在 GitHub 倉庫的 `Settings` -> `Secrets and variables` -> `Actions` 裡新增：
+
+Variables：
 
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_USERNAME`
-- `SMTP_PASSWORD`
 - `EMAIL_FROM`
+- `EMAIL_TO`
+
+Secrets：
+
+- `SMTP_PASSWORD`
 
 ## 如果你要用 Google Workspace / Gmail SMTP
 
@@ -28,6 +34,7 @@
 - `SMTP_USERNAME = 你的完整信箱`
 - `SMTP_PASSWORD = app password`
 - `EMAIL_FROM = 你的完整信箱`
+- `EMAIL_TO = justin@g-mail.nsysu.edu.tw`
 
 ## 部署步驟
 
