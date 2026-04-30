@@ -1,0 +1,35 @@
+name: Mac mini 現貨監控
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下載程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: 安裝 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: 執行監控
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: justin@g-mail.nsysu.edu.tw
+          PLAYWRIGHT_CHROME_CHANNEL: chrome
+        run: uv run --with playwright python github_actions_mac_mini_monitor.py

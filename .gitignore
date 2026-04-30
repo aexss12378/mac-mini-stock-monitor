@@ -1,0 +1,4 @@
+__pycache__/
+.playwright-mcp/
+*.pyc
+mac_mini_stock_state.json
