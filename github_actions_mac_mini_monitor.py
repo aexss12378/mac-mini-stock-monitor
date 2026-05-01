@@ -34,7 +34,11 @@ DEFAULT_EMAIL_TO = "justin@g-mail.nsysu.edu.tw"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 MODEL_LINK_PREFIX = "/tw-edu/shop/buy-mac/mac-mini/"
 DEFAULT_PICKUP_LOCATION = "110"
-APPLE_TW_EDU_COOKIE = "as_sfa=Mnx0dy1lZHV8dHd8fHpoX1RXfGVkdUluZHxpbnRlcm5ldHwxfDB8MQ; geo=TW"
+APPLE_TW_EDU_COOKIE = (
+    "as_sfa=Mnx0dy1lZHV8dHd8fHpoX1RXfGVkdUluZHxpbnRlcm5ldHwxfDB8MQ; "
+    "as_gloc=ef6e4582a2e7a24c23dfec8fea70a8a7cef1eae71b04935a773a55e53783cf643b85db6de93ea16db98790aa9a70fe2771a403f52886484d83d6c3dfc87085dbd56ddb48ad34260ef21cbfaa02d9099d78aab3a01ad8cf3029cad12d83bcc988; "
+    "geo=TW"
+)
 APPLE_TW_STORE_NAMES = {
     "R694": "Apple 信義 A13",
     "R713": "Apple 台北 101",
