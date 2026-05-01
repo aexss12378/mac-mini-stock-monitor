@@ -22,22 +22,22 @@ from html import unescape
 from html.parser import HTMLParser
 from typing import Any
 from urllib.error import URLError
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from check_mac_mini_stock import EDU_URL, REFURB_URL, USER_AGENT, check_refurbished, matches_target_variant
 
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:  # pragma: no cover - 讓本機未安裝時有清楚錯誤
-    sync_playwright = None
 
-
-FULFILLMENT_URL = "https://www.apple.com/tw-edu/shop/fulfillment-messages"
+SBA_AVAILABILITY_URL = "https://www.apple.com/tw-edu/shop/sba/availability-message"
 DEFAULT_EMAIL_TO = "justin@g-mail.nsysu.edu.tw"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 MODEL_LINK_PREFIX = "/tw-edu/shop/buy-mac/mac-mini/"
+DEFAULT_PICKUP_LOCATION = "110"
+APPLE_TW_STORE_NAMES = {
+    "R694": "Apple 信義 A13",
+    "R713": "Apple 台北 101",
+}
 METRICS_PATTERN = re.compile(
     r'<script type="application/json" id="metrics">(.*?)</script>',
     re.DOTALL,
@@ -90,11 +90,39 @@ def fetch_text(url: str) -> str:
         return response.read().decode(charset, errors="ignore")
 
 
+def fetch_json(url: str, params: dict[str, str]) -> dict[str, Any]:
+    full_url = f"{url}?{urlencode(params)}"
+    request = Request(
+        full_url,
+        headers={
+            "Accept": "application/json",
+            "Referer": EDU_URL,
+            "User-Agent": USER_AGENT,
+        },
+    )
+    with urlopen(request, timeout=30) as response:
+        charset = response.headers.get_content_charset() or "utf-8"
+        return json.loads(response.read().decode(charset, errors="ignore"))
+
+
 def format_currency(value: float | int | None) -> str | None:
     if value is None:
         return None
     amount = int(round(float(value)))
     return f"NT${amount:,}"
+
+
+def strip_markup(value: str | None) -> str:
+    if not value:
+        return ""
+    without_tags = re.sub(r"<[^>]+>", "", value)
+    return normalize_text(without_tags)
+
+
+def split_store_ids(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [store_id.strip() for store_id in value.split(",") if store_id.strip()]
 
 
 def extract_education_model_links(page_html: str) -> list[dict[str, str]]:
@@ -147,164 +175,62 @@ def extract_fulfillment_config(page_html: str) -> dict[str, Any]:
     }
 
 
-class PickupBrowser:
-    def __init__(self) -> None:
-        self._playwright = None
-        self._browser = None
-        self._page = None
+def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
+    payload = fetch_json(
+        SBA_AVAILABILITY_URL,
+        {
+            "parts.0": part_number,
+            "location": DEFAULT_PICKUP_LOCATION,
+            "searchNearby": "true",
+        },
+    )
+    content = payload.get("body", {}).get("content") or []
+    if not content:
+        return []
 
-    def __enter__(self) -> "PickupBrowser":
-        if sync_playwright is None:
-            raise RuntimeError(
-                "缺少 playwright。請用 `uv run --with playwright python github_actions_mac_mini_monitor.py` 執行。"
-            )
+    availability = content[0]
+    pickup_message = availability.get("pickupMessage") or {}
+    detailed_store_id = pickup_message.get("storeId") or availability.get("storeId") or ""
+    eligible_store_ids = split_store_ids(availability.get("eligibleStores"))
 
-        self._playwright = sync_playwright().start()
-        launch_errors: list[str] = []
-        channel = os.environ.get("PLAYWRIGHT_CHROME_CHANNEL", "chrome").strip()
+    if not eligible_store_ids and detailed_store_id:
+        eligible_store_ids = [detailed_store_id]
 
-        if channel:
-            try:
-                self._browser = self._playwright.chromium.launch(channel=channel, headless=True)
-            except Exception as exc:  # pragma: no cover - 視執行環境而定
-                launch_errors.append(f"{channel}: {exc}")
-
-        if self._browser is None:
-            try:
-                self._browser = self._playwright.chromium.launch(headless=True)
-            except Exception as exc:  # pragma: no cover - 視執行環境而定
-                launch_errors.append(f"chromium: {exc}")
-                message = "；".join(launch_errors) or "無法啟動瀏覽器"
-                raise RuntimeError(f"無法啟動無頭瀏覽器：{message}") from exc
-
-        self._page = self._browser.new_page()
-        return self
-
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        if self._browser is not None:
-            self._browser.close()
-        if self._playwright is not None:
-            self._playwright.stop()
-
-    def collect_pickup_entries(
-        self,
-        model_url: str,
-        availability_part_number: str,
-        fulfillment_part: str,
-        option_codes: list[str],
-    ) -> list[dict[str, str]]:
-        assert self._page is not None
-        self._page.goto(model_url, wait_until="domcontentloaded")
-        entries = self._page.evaluate(
-            """
-            async ({ availabilityPartNumber, fulfillmentPart, fulfillmentUrl, optionCodes }) => {
-              const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
-              const buildUrl = (storeId) => {
-                const url = new URL(fulfillmentUrl);
-                url.searchParams.set("fae", "true");
-                url.searchParams.set("little", "false");
-                url.searchParams.set("parts.0", fulfillmentPart);
-                if (optionCodes.length) {
-                  url.searchParams.set("option.0", optionCodes.join(","));
-                }
-                url.searchParams.set("mts.0", "regular");
-                url.searchParams.set("mts.1", "sticky");
-                url.searchParams.set("mts.2", "compact");
-                url.searchParams.set("fts", "true");
-                if (storeId) {
-                  url.searchParams.set("store", storeId);
-                }
-                return url.toString();
-              };
-
-              const fetchPickupMessage = async (storeId) => {
-                const response = await fetch(buildUrl(storeId));
-                if (!response.ok) {
-                  throw new Error(`fulfillment ${response.status}`);
-                }
-                const payload = await response.json();
-                return payload.body.content.pickupMessage;
-              };
-
-              const toEntry = (pickupMessage, storeId) => {
-                const stores = pickupMessage.stores || [];
-                if (!stores.length) {
-                  return null;
-                }
-                const store = stores[0];
-                const availabilityMap = store.partsAvailability || {};
-                let availability = availabilityMap[availabilityPartNumber];
-                if (!availability) {
-                  const values = Object.values(availabilityMap);
-                  if (values.length === 1) {
-                    availability = values[0];
-                  }
-                }
-                if (!availability) {
-                  return null;
-                }
-
-                const name =
-                  normalize(store?.retailStore?.address?.companyName) ||
-                  normalize(store?.address?.address) ||
-                  normalize(store?.storeName) ||
-                  storeId ||
-                  "Apple 直營店";
-
-                const pickup =
-                  normalize(availability?.messageTypes?.regular?.storePickupQuote) ||
-                  normalize(availability?.pickupSearchQuote) ||
-                  normalize(availability?.messageTypes?.sticky?.storePickupQuote) ||
-                  "狀態未知";
-
-                return {
-                  store_id: storeId || store.storeNumber || "",
-                  store: name,
-                  eligible: availability.storePickEligible ? "true" : "false",
-                  pickup
-                };
-              };
-
-              const first = await fetchPickupMessage(null);
-              const storeIds = normalize(first.availabilityStores)
-                .split(",")
-                .map((value) => value.trim())
-                .filter(Boolean);
-
-              const entries = [];
-              const seen = new Set();
-
-              if (storeIds.length) {
-                for (const storeId of storeIds) {
-                  const entry = toEntry(await fetchPickupMessage(storeId), storeId);
-                  if (!entry) {
-                    continue;
-                  }
-                  const key = `${entry.store_id}::${entry.pickup}`;
-                  if (seen.has(key)) {
-                    continue;
-                  }
-                  seen.add(key);
-                  entries.push(entry);
-                }
-              }
-
-              if (entries.length) {
-                return entries;
-              }
-
-              const fallback = toEntry(first, "");
-              return fallback ? [fallback] : [];
-            }
-            """,
+    if not availability.get("availableAtAnyStore") and not eligible_store_ids:
+        return [
             {
-                "availabilityPartNumber": availability_part_number,
-                "fulfillmentPart": fulfillment_part,
-                "fulfillmentUrl": FULFILLMENT_URL,
-                "optionCodes": option_codes,
-            },
+                "store_id": "",
+                "store": "Apple 直營店取貨",
+                "eligible": "false",
+                "pickup": "目前沒有可取貨門市",
+            }
+        ]
+
+    pickup_quote = strip_markup(
+        pickup_message.get("pickupSearchQuote") or pickup_message.get("storePickupQuote")
+    )
+    if not pickup_quote:
+        pickup_quote = strip_markup(availability.get("availableMessageLink")) or "可取貨"
+
+    detailed_store_name = (
+        normalize_text((pickup_message.get("address") or {}).get("address", ""))
+        or APPLE_TW_STORE_NAMES.get(detailed_store_id, "")
+    )
+    entries: list[dict[str, str]] = []
+    for store_id in eligible_store_ids:
+        store_name = APPLE_TW_STORE_NAMES.get(store_id, store_id)
+        if store_id == detailed_store_id and detailed_store_name:
+            store_name = detailed_store_name
+        entries.append(
+            {
+                "store_id": store_id,
+                "store": store_name,
+                "eligible": "true",
+                "pickup": pickup_quote,
+            }
         )
-        return entries
+
+    return entries
 
 
 def collect_education_models() -> list[dict[str, Any]]:
@@ -312,38 +238,32 @@ def collect_education_models() -> list[dict[str, Any]]:
     model_links = extract_education_model_links(page_html)
     models: list[dict[str, Any]] = []
 
-    with PickupBrowser() as pickup_browser:
-        for model_link in model_links:
-            model_html = fetch_text(model_link["url"])
-            metrics = extract_metrics_data(model_html)
-            fulfillment_config = extract_fulfillment_config(model_html)
-            product = metrics["data"]["products"][0]
-            part_number = product["partNumber"]
-            pickup_entries: list[dict[str, str]] = []
-            pickup_error = None
+    for model_link in model_links:
+        model_html = fetch_text(model_link["url"])
+        metrics = extract_metrics_data(model_html)
+        fulfillment_config = extract_fulfillment_config(model_html)
+        product = metrics["data"]["products"][0]
+        part_number = product["partNumber"]
+        pickup_entries: list[dict[str, str]] = []
+        pickup_error = None
 
-            try:
-                pickup_entries = pickup_browser.collect_pickup_entries(
-                    model_link["url"],
-                    part_number,
-                    fulfillment_config["part"],
-                    fulfillment_config["option_codes"],
-                )
-            except Exception as exc:
-                pickup_error = f"Apple 直營店取貨：目前無法取得資料（{exc}）"
+        try:
+            pickup_entries = collect_pickup_entries(part_number)
+        except Exception as exc:
+            pickup_error = f"Apple 直營店取貨：目前無法取得資料（{exc}）"
 
-            models.append(
-                {
-                    "model": model_link["model"],
-                    "url": model_link["url"],
-                    "part_number": part_number,
-                    "fulfillment_part": fulfillment_config["part"],
-                    "option_codes": fulfillment_config["option_codes"],
-                    "price": format_currency(product.get("price", {}).get("fullPrice")),
-                    "pickup_entries": pickup_entries,
-                    "pickup_error": pickup_error,
-                }
-            )
+        models.append(
+            {
+                "model": model_link["model"],
+                "url": model_link["url"],
+                "part_number": part_number,
+                "fulfillment_part": fulfillment_config["part"],
+                "option_codes": fulfillment_config["option_codes"],
+                "price": format_currency(product.get("price", {}).get("fullPrice")),
+                "pickup_entries": pickup_entries,
+                "pickup_error": pickup_error,
+            }
+        )
 
     return models
 

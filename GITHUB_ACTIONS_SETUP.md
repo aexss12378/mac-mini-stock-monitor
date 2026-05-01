@@ -1,7 +1,7 @@
 # GitHub Actions 設定說明
 
 這個版本不依賴 Codex App，也不需要你的 Mac 持續開機。
-它會在 GitHub Actions 裡用無頭 Chrome 讀 Apple 頁面與店取資料。
+它會在 GitHub Actions 裡直接讀 Apple 頁面與店取資料，不需要你的 Mac 持續開機。
 
 ## 需要的檔案
 
@@ -49,6 +49,6 @@ Secrets：
 本機只看輸出、不寄信：
 
 ```bash
-uv run --with playwright python github_actions_mac_mini_monitor.py --json
-uv run --with playwright python github_actions_mac_mini_monitor.py --dry-run
+uv run python github_actions_mac_mini_monitor.py --json --dry-run
+uv run python github_actions_mac_mini_monitor.py --dry-run
 ```
