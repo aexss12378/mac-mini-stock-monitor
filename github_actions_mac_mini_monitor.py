@@ -34,6 +34,7 @@ DEFAULT_EMAIL_TO = "justin@g-mail.nsysu.edu.tw"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 MODEL_LINK_PREFIX = "/tw-edu/shop/buy-mac/mac-mini/"
 DEFAULT_PICKUP_LOCATION = "110"
+APPLE_TW_EDU_COOKIE = "as_sfa=Mnx0dy1lZHV8dHd8fHpoX1RXfGVkdUluZHxpbnRlcm5ldHwxfDB8MQ; geo=TW"
 APPLE_TW_STORE_NAMES = {
     "R694": "Apple 信義 A13",
     "R713": "Apple 台北 101",
@@ -96,6 +97,7 @@ def fetch_json(url: str, params: dict[str, str]) -> dict[str, Any]:
         full_url,
         headers={
             "Accept": "application/json",
+            "Cookie": APPLE_TW_EDU_COOKIE,
             "Referer": EDU_URL,
             "User-Agent": USER_AGENT,
         },
