@@ -21,7 +21,8 @@ from email.message import EmailMessage
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urlencode, urljoin
+from urllib.error import URLError
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -380,6 +381,8 @@ def build_email_body(refurbished: dict[str, Any], education_models: list[dict[st
         if model.get("pickup_entries"):
             for pickup_entry in model["pickup_entries"]:
                 lines.append(f"  {pickup_entry['store']}：{pickup_entry['pickup']}")
+        elif model.get("pickup_error"):
+            lines.append(f"  {model['pickup_error']}")
         else:
             lines.append("  Apple 直營店取貨：目前無法取得資料")
         lines.append("")
@@ -410,10 +413,11 @@ def send_email(subject: str, body: str) -> None:
             ("SMTP_HOST", smtp_host),
             ("SMTP_USERNAME", smtp_username),
             ("SMTP_PASSWORD", smtp_password),
-            ("EMAIL_FROM", email_from),
         ]
         if not value
     ]
+    if not email_from:
+        missing.append("EMAIL_FROM")
     if missing:
         raise RuntimeError(f"缺少必要環境變數：{', '.join(missing)}")
 
@@ -455,8 +459,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    refurbished = check_refurbished()
-    education_models = collect_education_models()
+    try:
+        refurbished = check_refurbished()
+    except (URLError, OSError) as exc:
+        print(f"抓取整修品頁面失敗：{exc}", file=sys.stderr)
+        return 1
+
+    try:
+        education_models = collect_education_models()
+    except (URLError, OSError) as exc:
+        print(f"抓取教育優惠頁面失敗：{exc}", file=sys.stderr)
+        return 1
+
     payload = build_payload(refurbished, education_models)
 
     if args.json:

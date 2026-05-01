@@ -154,7 +154,7 @@ def check_refurbished() -> dict[str, Any]:
     }
 
 
-def check_education(enable_browser_pickup: bool = False) -> dict[str, Any]:
+def check_education() -> dict[str, Any]:
     page_html = fetch_html(EDU_URL)
     lines = extract_lines(page_html)
     joined = "\n".join(lines)
@@ -164,18 +164,11 @@ def check_education(enable_browser_pickup: bool = False) -> dict[str, Any]:
     )
     unavailable_hits = [phrase for phrase in EDU_UNAVAILABLE_PHRASES if phrase in joined]
     available = has_buy_heading and bool(model_lines) and not unavailable_hits
-    summary_lines = model_lines[:4]
-    pickup_lines = []
-    pickup_error = None
-    # 店取資料必須由外部受控工具完整抓取後再加入通知，腳本本身不做不完整的降級抓取。
-    _ = enable_browser_pickup
     return {
         "name": "Apple 台灣教育優惠",
         "url": EDU_URL,
         "available": available,
-        "details": summary_lines,
-        "pickup_lines": pickup_lines,
-        "pickup_error": pickup_error,
+        "details": model_lines[:4],
         "warnings": unavailable_hits,
     }
 
@@ -229,11 +222,6 @@ def print_report(results: list[dict[str, Any]]) -> None:
         if result.get("details"):
             for detail in result["details"]:
                 print(f"  - {detail}")
-                for pickup_line in result.get("pickup_lines", []):
-                    if pickup_line["model"] == detail:
-                        print(f"    {pickup_line['pickup']}")
-        if result.get("pickup_error"):
-            print(f"  - {result['pickup_error']}")
         if result.get("warnings"):
             for warning in result["warnings"]:
                 print(f"  - 警示：{warning}")
@@ -286,18 +274,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="清除已通知狀態",
     )
-    parser.add_argument(
-        "--enable-browser-pickup",
-        action="store_true",
-        help="保留相容參數；店取資訊需由工作流程中的受控工具另行讀取",
-    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        results = [check_refurbished(), check_education(enable_browser_pickup=args.enable_browser_pickup)]
+        results = [check_refurbished(), check_education()]
     except HTTPError as exc:
         print(f"抓取 Apple 頁面失敗：HTTP {exc.code}", file=sys.stderr)
         return 1
