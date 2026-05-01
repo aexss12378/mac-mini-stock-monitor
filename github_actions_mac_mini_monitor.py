@@ -23,6 +23,7 @@ from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from check_mac_mini_stock import EDU_URL, REFURB_URL, USER_AGENT, check_refurbished, matches_target_variant
 
@@ -34,6 +35,7 @@ except ImportError:  # pragma: no cover - 讓本機未安裝時有清楚錯誤
 
 FULFILLMENT_URL = "https://www.apple.com/tw-edu/shop/fulfillment-messages"
 DEFAULT_EMAIL_TO = "justin@g-mail.nsysu.edu.tw"
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 MODEL_LINK_PREFIX = "/tw-edu/shop/buy-mac/mac-mini/"
 METRICS_PATTERN = re.compile(
     r'<script type="application/json" id="metrics">(.*?)</script>',
@@ -349,7 +351,7 @@ def build_email_body(refurbished: dict[str, Any], education_models: list[dict[st
     lines = [
         "Mac mini 現貨通知",
         "",
-        f"檢查時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"檢查時間：{datetime.now(TAIPEI_TZ).strftime('%Y-%m-%d %H:%M:%S')}（台北時間）",
         "",
         "來源網址：",
         f"- Apple 台灣整修品：{REFURB_URL}",
@@ -387,7 +389,7 @@ def build_email_body(refurbished: dict[str, Any], education_models: list[dict[st
 
 def build_payload(refurbished: dict[str, Any], education_models: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "checked_at": datetime.now().isoformat(timespec="seconds"),
+        "checked_at": datetime.now(TAIPEI_TZ).isoformat(timespec="seconds"),
         "available_now": refurbished["available"] or bool(education_models),
         "refurbished": refurbished,
         "education_models": education_models,
