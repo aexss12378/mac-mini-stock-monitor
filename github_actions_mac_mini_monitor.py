@@ -127,6 +127,25 @@ def split_store_ids(value: str | None) -> list[str]:
     return [store_id.strip() for store_id in value.split(",") if store_id.strip()]
 
 
+def pickup_query_candidates(part_number: str) -> list[dict[str, str]]:
+    base = {
+        "parts.0": part_number,
+        "location": DEFAULT_PICKUP_LOCATION,
+        "searchNearby": "true",
+    }
+    candidates = [base]
+    for store_id in APPLE_TW_STORE_NAMES:
+        candidates.extend(
+            [
+                {**base, "store": store_id},
+                {**base, "storeId": store_id},
+                {**base, "storeNumber": store_id},
+            ]
+        )
+    candidates.append({"parts.0": part_number, "postalCode": DEFAULT_PICKUP_LOCATION})
+    return candidates
+
+
 def extract_education_model_links(page_html: str) -> list[dict[str, str]]:
     parser = AnchorExtractor()
     parser.feed(page_html)
@@ -178,16 +197,25 @@ def extract_fulfillment_config(page_html: str) -> dict[str, Any]:
 
 
 def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
-    payload = fetch_json(
-        SBA_AVAILABILITY_URL,
-        {
-            "parts.0": part_number,
-            "location": DEFAULT_PICKUP_LOCATION,
-            "searchNearby": "true",
-        },
-    )
-    content = payload.get("body", {}).get("content") or []
+    content: list[dict[str, Any]] = []
+    last_error: Exception | None = None
+    for params in pickup_query_candidates(part_number):
+        try:
+            payload = fetch_json(SBA_AVAILABILITY_URL, params)
+        except Exception as exc:
+            last_error = exc
+            continue
+        candidate_content = payload.get("body", {}).get("content") or []
+        if not candidate_content:
+            continue
+        content = candidate_content
+        availability = candidate_content[0]
+        if availability.get("availableAtAnyStore") or availability.get("pickupMessage"):
+            break
+
     if not content:
+        if last_error:
+            raise last_error
         return []
 
     availability = content[0]
