@@ -8,7 +8,6 @@
 
 執行範例：
     uv run python check_mac_mini_stock.py --json
-    uv run python check_mac_mini_stock.py --clear-state
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ import argparse
 import html
 from html.parser import HTMLParser
 import json
-from pathlib import Path
 import re
 import sys
 from typing import Any
@@ -27,7 +25,6 @@ from urllib.request import Request, urlopen
 
 REFURB_URL = "https://www.apple.com/tw/shop/refurbished/mac"
 EDU_URL = "https://www.apple.com/tw-edu/shop/buy-mac/mac-mini"
-DEFAULT_STATE_FILE = Path(__file__).with_name("mac_mini_stock_state.json")
 TARGET_MEMORY_OPTIONS = ("16GB", "24GB")
 EXCLUDED_CHIP_PHRASES = ("M4 Pro",)
 USER_AGENT = (
@@ -139,11 +136,11 @@ def check_refurbished() -> dict[str, Any]:
     lines = extract_lines(page_html)
     product_lines = unique_preserving_order(
         [
-        line
-        for line in lines
-        if matches_target_variant(line)
-        and "整修品" in line
-        and "關於 Mac 整修品" not in line
+            line
+            for line in lines
+            if matches_target_variant(line)
+            and "整修品" in line
+            and "關於 Mac 整修品" not in line
         ]
     )
     return {
@@ -173,48 +170,6 @@ def check_education() -> dict[str, Any]:
     }
 
 
-def build_signature(results: list[dict[str, Any]]) -> str:
-    available_results = []
-    for result in results:
-        if not result["available"]:
-            continue
-        available_results.append(
-            {
-                "name": result["name"],
-                "details": result.get("details", []),
-            }
-        )
-    return json.dumps(available_results, ensure_ascii=False, sort_keys=True)
-
-
-def build_canonical_signature(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def load_custom_signature(path: Path) -> str:
-    raw = path.read_text(encoding="utf-8")
-    try:
-        return build_canonical_signature(json.loads(raw))
-    except json.JSONDecodeError:
-        return raw.strip()
-
-
-def load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-
-
-def save_state(path: Path, state: dict[str, Any]) -> None:
-    path.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-
 def print_report(results: list[dict[str, Any]]) -> None:
     for result in results:
         status = "有現貨" if result["available"] else "沒有現貨"
@@ -230,13 +185,9 @@ def print_report(results: list[dict[str, Any]]) -> None:
 
 def build_payload(
     results: list[dict[str, Any]],
-    variant_signature: str,
-    notification_needed: bool,
 ) -> dict[str, Any]:
     return {
         "available_now": any(result["available"] for result in results),
-        "notification_needed": notification_needed,
-        "variant_signature": variant_signature,
         "results": results,
     }
 
@@ -244,35 +195,14 @@ def build_payload(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--state-file",
-        type=Path,
-        default=DEFAULT_STATE_FILE,
-        help=f"狀態檔路徑，預設為 {DEFAULT_STATE_FILE.name}",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="只輸出結果，不更新狀態檔",
+        help="只輸出結果",
     )
     parser.add_argument(
         "--json",
         action="store_true",
         help="輸出 JSON 結果",
-    )
-    parser.add_argument(
-        "--mark-notified",
-        action="store_true",
-        help="保留相容參數；目前模式不使用已通知狀態",
-    )
-    parser.add_argument(
-        "--mark-notified-signature-file",
-        type=Path,
-        help="保留相容參數；目前模式不使用通知簽名",
-    )
-    parser.add_argument(
-        "--clear-state",
-        action="store_true",
-        help="清除已通知狀態",
     )
     return parser.parse_args()
 
@@ -288,14 +218,12 @@ def main() -> int:
         print(f"抓取 Apple 頁面失敗：{exc.reason}", file=sys.stderr)
         return 1
 
-    variant_signature = build_signature(results)
     available_now = any(result["available"] for result in results)
-    notification_needed = available_now
 
     if args.json:
         print(
             json.dumps(
-                build_payload(results, variant_signature, notification_needed),
+                build_payload(results),
                 ensure_ascii=False,
                 indent=2,
             )
@@ -304,22 +232,6 @@ def main() -> int:
         print_report(results)
 
     if args.dry_run:
-        return 0
-
-    if args.clear_state:
-        state = load_state(args.state_file)
-        if state.get("last_notified_signature") or state.get("last_notified_notification_signature"):
-            state["last_notified_signature"] = ""
-            state["last_notified_notification_signature"] = ""
-            save_state(args.state_file, state)
-            print("已清除通知狀態。")
-        else:
-            print("目前沒有需要清除的通知狀態。")
-        return 0
-
-    if args.mark_notified:
-        _ = args.mark_notified_signature_file
-        print("目前模式不使用已通知狀態。")
         return 0
 
     if args.json:
