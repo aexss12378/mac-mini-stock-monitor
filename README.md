@@ -2,7 +2,7 @@
 
 這個專案用 GitHub Actions 定期檢查 Apple 台灣 Mac mini 供應狀態。符合條件時，工作流程會用 SMTP 寄出通知信。
 
-目前設計不依賴 Codex App、本機瀏覽器、Safari、Chrome 或 Apple Events。只要 GitHub Actions 正常執行，就不需要讓自己的 Mac 持續開機。
+只要有 GitHub 帳號即可使用，不需要在自己電腦上安裝或持續執行任何東西。
 
 ## 目前監控範圍
 
@@ -24,9 +24,8 @@
 
 ## 安裝方式
 
-1. 建立或 fork 一個 GitHub 儲存庫。
-2. 把本專案檔案放進儲存庫，並推到預設分支。
-3. 到 GitHub 儲存庫的 `Settings` -> `Secrets and variables` -> `Actions` 設定寄信資訊。
+1. Fork 這個儲存庫到自己的 GitHub 帳號。
+2. 到 GitHub 儲存庫的 `Settings` -> `Secrets and variables` -> `Actions` 設定寄信資訊。
 
 Variables：
 
@@ -55,8 +54,6 @@ EMAIL_FROM=寄件信箱
 EMAIL_TO=收件信箱
 ```
 
-不要把實際密碼、應用程式密碼、cookie 或 token 寫進 README、程式註解或 commit 訊息。
-
 ## 使用方式
 
 GitHub Actions 會每 6 小時執行一次，也可以手動觸發：
@@ -66,7 +63,9 @@ GitHub Actions 會每 6 小時執行一次，也可以手動觸發：
 3. 點選 `Run workflow`。
 4. 等待工作流程完成，檢查日誌和收件信箱。
 
-本機只看結果、不寄信：
+本機執行需要 Python 3.12 與 [uv](https://github.com/astral-sh/uv)。
+
+只看結果、不寄信：
 
 ```bash
 uv run python github_actions_mac_mini_monitor.py --json --dry-run
@@ -78,40 +77,6 @@ uv run python github_actions_mac_mini_monitor.py --dry-run
 ```bash
 uv run python check_mac_mini_stock.py --json
 ```
-
-## 問題解決紀錄
-
-### 原始問題
-
-本機或瀏覽器可以看到 Apple 直營店取貨資訊，但 GitHub Actions 裡顯示「目前無法取得資料」或沒有列出門市。這代表程式不是完全沒抓到 Apple 頁面，而是雲端執行環境缺少 Apple 用來判斷取貨地點的狀態。
-
-### 原因
-
-舊查詢方式依賴 `fulfillment-messages` 或瀏覽器狀態。這在本機瀏覽器可能看起來正常，但不適合無頭、雲端、排程環境。
-
-Apple 的取貨查詢還需要三件事：
-
-- 實際商品料號，例如頁面商品資料裡的 `partNumber`
-- 台灣商店脈絡
-- 地點資訊
-
-只用可配置商品代號和選項代碼，容易拿不到完整的 Apple 直營店取貨資料。
-
-### 修法
-
-現在流程改成：
-
-1. 從教育優惠 Mac mini 頁面解析符合條件的商品連結。
-2. 進入商品頁，從頁面資料抓實際 `partNumber`。
-3. 用 `partNumber` 查 `sba/availability-message`。
-4. 查詢時帶入台灣商店脈絡與地點資訊。
-5. 對 Apple 台灣直營店代號做備援查詢。
-
-修正後，GitHub Actions 已能在遠端日誌列出 Apple 台北 101、Apple 信義 A13、售價與供貨日期。
-
-### 最終設計
-
-監控採無狀態設計：每次執行只看當下狀態，不把這次結果和上一次結果做去重綁定。只要當下有符合條件的現貨，就寄出通知。
 
 ## 自訂設定
 
@@ -188,5 +153,38 @@ EMAIL_TO
 
 - 密碼、應用程式密碼、token 只放在 GitHub Actions Secrets。
 - 一般環境變數放在 GitHub Actions Variables。
-- 不要把實際寄件信箱、收件信箱、密碼、cookie 或 token 寫進公開文件。
-- 如果 Apple 查詢需要的地點狀態失效，重新取得時也不要把完整敏感值寫進 README。
+- 不要把實際寄件信箱、收件信箱、密碼、cookie 或 token 寫進公開文件、程式註解或 commit 訊息。
+
+## 問題解決紀錄
+
+### 原始問題
+
+本機或瀏覽器可以看到 Apple 直營店取貨資訊，但 GitHub Actions 裡顯示「目前無法取得資料」或沒有列出門市。這代表程式不是完全沒抓到 Apple 頁面，而是雲端執行環境缺少 Apple 用來判斷取貨地點的狀態。
+
+### 原因
+
+舊查詢方式依賴 `fulfillment-messages` 或瀏覽器狀態。這在本機瀏覽器可能看起來正常，但不適合無頭、雲端、排程環境。
+
+Apple 的取貨查詢還需要三件事：
+
+- 實際商品料號，例如頁面商品資料裡的 `partNumber`
+- 台灣商店脈絡
+- 地點資訊
+
+只用可配置商品代號和選項代碼，容易拿不到完整的 Apple 直營店取貨資料。
+
+### 修法
+
+現在流程改成：
+
+1. 從教育優惠 Mac mini 頁面解析符合條件的商品連結。
+2. 進入商品頁，從頁面資料抓實際 `partNumber`。
+3. 用 `partNumber` 查 `sba/availability-message`。
+4. 查詢時帶入台灣商店脈絡與地點資訊。
+5. 對 Apple 台灣直營店代號做備援查詢。
+
+修正後，GitHub Actions 已能在遠端日誌列出 Apple 台北 101、Apple 信義 A13、售價與供貨日期。
+
+### 最終設計
+
+監控採無狀態設計：每次執行只看當下狀態，不把這次結果和上一次結果做去重綁定。只要當下有符合條件的現貨，就寄出通知。
