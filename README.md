@@ -113,42 +113,47 @@ Apple 的取貨查詢還需要三件事：
 
 監控採無狀態設計：每次執行只看當下狀態，不把這次結果和上一次結果做去重綁定。只要當下有符合條件的現貨，就寄出通知。
 
-## 未來拓展
+## 自訂設定
 
-### 改監控型號
+### 改監控 URL
+
+整修品頁和教育優惠頁的網址定義在 `check_mac_mini_stock.py`：
+
+```python
+REFURB_URL = "https://www.apple.com/tw/shop/refurbished/mac"
+EDU_URL = "https://www.apple.com/tw-edu/shop/buy-mac/mac-mini"
+```
+
+若要監控其他商品，改 `EDU_URL` 指向目標商品頁。注意 Apple 前端常把 `partNumber`、價格等關鍵資料放在頁面內嵌 JSON，而不是純文字，改 URL 後要確認解析邏輯仍能取到正確欄位。
+
+### 改監控型號條件
 
 調整 `check_mac_mini_stock.py`：
 
-- `TARGET_MEMORY_OPTIONS`：改目標記憶體
-- `EXCLUDED_CHIP_PHRASES`：改排除條件
-- `matches_target_variant()`：需要更細的 CPU、GPU、容量條件時改這裡
+- `TARGET_MEMORY_OPTIONS`：符合條件的記憶體規格，例如 `("16GB", "24GB")`
+- `EXCLUDED_CHIP_PHRASES`：排除特定晶片，例如 `("M4 Pro",)`
+- `matches_target_variant()`：需要比對 CPU、GPU、容量等更細條件時改這裡
 
 ### 改排程
 
-調整 `.github/workflows/mac-mini-stock.yml` 的 `cron`。目前是每 6 小時一次。
+調整 `.github/workflows/mac-mini-stock.yml` 的 `cron`。目前是每 6 小時一次（`0 */6 * * *`）。
 
-### 加其他 Apple 商品
+Cron 語法：`分 時 日 月 週`，例如每小時執行改成 `0 * * * *`。
 
-可以沿用目前模式：
+### 改門市對照與取貨地點
 
-1. 找到商品列表頁。
-2. 解析符合條件的商品頁連結。
-3. 從商品頁抓實際 `partNumber`。
-4. 用 Apple 的可用性資料查價格、供貨與取貨資訊。
+`github_actions_mac_mini_monitor.py` 有兩個相關設定：
 
-不要只靠頁面文字判斷完整供貨狀態，因為 Apple 前端常把關鍵資料放在頁面 JSON 或後續查詢裡。
+```python
+DEFAULT_PICKUP_LOCATION = "110"  # 台灣郵遞區號，影響取貨查詢範圍
 
-### 加其他通知方式
+APPLE_TW_STORE_NAMES = {
+    "R694": "Apple 信義 A13",
+    "R713": "Apple 台北 101",
+}
+```
 
-目前通知管道是 SMTP。未來可以在 `send_email()` 外新增 Slack、Telegram、LINE Notify 替代方案，或把通知組裝成共用函式後接多個 sender。
-
-### 加去重策略
-
-目前每次有現貨就寄信。如果未來要避免重複通知，可以加入狀態儲存，例如 GitHub Actions artifact、repository variable、外部資料庫，或其他可跨工作流程執行保存資料的地方。
-
-### 加更多門市或地點
-
-目前門市名稱對照放在 `APPLE_TW_STORE_NAMES`。如果 Apple 台灣新增門市，可以補上新門市代號與顯示名稱。若要監控其他地區，也要同步調整地點資訊與商店脈絡。
+若 Apple 台灣新增門市，從 Apple 頁面原始碼或 API 回應找到門市代號（格式如 `R###`），補進 `APPLE_TW_STORE_NAMES`。若要監控其他地區，一併調整 `DEFAULT_PICKUP_LOCATION` 和 `APPLE_TW_EDU_COOKIE` 裡的商店脈絡。
 
 ## 疑難排解
 
