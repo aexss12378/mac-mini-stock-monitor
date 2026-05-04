@@ -12,13 +12,11 @@ jobs:
       - name: 下載程式碼
         uses: actions/checkout@v4
 
-      - name: 安裝 Python
-        uses: actions/setup-python@v5
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-
-      - name: 安裝 uv
-        uses: astral-sh/setup-uv@v4
+          enable-cache: true
 
       - name: 執行監控
         env:
@@ -29,3 +27,16 @@ jobs:
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}
           EMAIL_TO: ${{ vars.EMAIL_TO }}
         run: uv run python github_actions_mac_mini_monitor.py
+
+      - name: 執行失敗通知
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[監控失敗] Mac mini 現貨監控 workflow 出錯 - ${new Date().toISOString().slice(0,10)}`,
+              body: `Workflow 執行失敗，請前往 [Actions 頁面](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) 查看詳情。`,
+              labels: ['bug']
+            })
