@@ -26,7 +26,7 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-from check_mac_mini_stock import EDU_URL, REFURB_URL, USER_AGENT, check_refurbished, matches_target_variant
+from check_mac_mini_stock import EDU_URL, REFURB_URL, USER_AGENT, check_education, check_refurbished, matches_target_variant
 
 
 SBA_AVAILABILITY_URL = "https://www.apple.com/tw-edu/shop/sba/availability-message"
@@ -344,10 +344,10 @@ def build_email_body(refurbished: dict[str, Any], education_models: list[dict[st
     return "\n".join(lines).rstrip()
 
 
-def build_payload(refurbished: dict[str, Any], education_models: list[dict[str, Any]]) -> dict[str, Any]:
+def build_payload(refurbished: dict[str, Any], education_models: list[dict[str, Any]], edu_available: bool) -> dict[str, Any]:
     return {
         "checked_at": datetime.now(TAIPEI_TZ).isoformat(timespec="seconds"),
-        "available_now": refurbished["available"] or bool(education_models),
+        "available_now": refurbished["available"] or edu_available,
         "refurbished": refurbished,
         "education_models": education_models,
     }
@@ -420,12 +420,18 @@ def main() -> int:
         return 1
 
     try:
-        education_models = collect_education_models()
+        edu_check = check_education()
     except (URLError, OSError) as exc:
         print(f"抓取教育優惠頁面失敗：{exc}", file=sys.stderr)
         return 1
 
-    payload = build_payload(refurbished, education_models)
+    try:
+        education_models = collect_education_models() if edu_check["available"] else []
+    except (URLError, OSError) as exc:
+        print(f"抓取教育優惠商品頁失敗：{exc}", file=sys.stderr)
+        return 1
+
+    payload = build_payload(refurbished, education_models, edu_check["available"])
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
