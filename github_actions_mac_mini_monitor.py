@@ -179,6 +179,10 @@ def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
         "searchNearby": "true",
     })
     stores = payload.get("body", {}).get("stores") or []
+    print(f"[debug] retail API: {len(stores)} stores, storeNumbers={[s.get('storeNumber') for s in stores[:5]]}", file=sys.stderr)
+    if stores:
+        first_avail = (stores[0].get("partsAvailability") or {}).get(part_number, {})
+        print(f"[debug] first store {stores[0].get('storeNumber')} pickupDisplay={first_avail.get('pickupDisplay')}", file=sys.stderr)
     entries: list[dict[str, str]] = []
     for store in stores:
         store_number = store.get("storeNumber", "")
