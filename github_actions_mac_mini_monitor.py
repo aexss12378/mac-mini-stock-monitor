@@ -29,16 +29,11 @@ from zoneinfo import ZoneInfo
 from check_mac_mini_stock import EDU_URL, REFURB_URL, USER_AGENT, check_education, check_refurbished, matches_target_variant
 
 
-SBA_AVAILABILITY_URL = "https://www.apple.com/tw-edu/shop/sba/availability-message"
+RETAIL_PICKUP_URL = "https://www.apple.com/tw/shop/retail/pickup-message"
 DEFAULT_EMAIL_TO = "justin@g-mail.nsysu.edu.tw"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 MODEL_LINK_PREFIX = "/tw-edu/shop/buy-mac/mac-mini/"
 DEFAULT_PICKUP_LOCATION = "110"
-APPLE_TW_EDU_COOKIE = (
-    "as_sfa=Mnx0dy1lZHV8dHd8fHpoX1RXfGVkdUluZHxpbnRlcm5ldHwxfDB8MQ; "
-    "as_gloc=ef6e4582a2e7a24c23dfec8fea70a8a7cef1eae71b04935a773a55e53783cf643b85db6de93ea16db98790aa9a70fe2771a403f52886484d83d6c3dfc87085dbd56ddb48ad34260ef21cbfaa02d9099d78aab3a01ad8cf3029cad12d83bcc988; "
-    "geo=TW"
-)
 APPLE_TW_STORE_NAMES = {
     "R694": "Apple 信義 A13",
     "R713": "Apple 台北 101",
@@ -101,7 +96,6 @@ def fetch_json(url: str, params: dict[str, str]) -> dict[str, Any]:
         full_url,
         headers={
             "Accept": "application/json",
-            "Cookie": APPLE_TW_EDU_COOKIE,
             "Referer": EDU_URL,
             "User-Agent": USER_AGENT,
         },
@@ -125,29 +119,7 @@ def strip_markup(value: str | None) -> str:
     return normalize_text(without_tags)
 
 
-def split_store_ids(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [store_id.strip() for store_id in value.split(",") if store_id.strip()]
 
-
-def pickup_query_candidates(part_number: str) -> list[dict[str, str]]:
-    base = {
-        "parts.0": part_number,
-        "location": DEFAULT_PICKUP_LOCATION,
-        "searchNearby": "true",
-    }
-    candidates = [base]
-    for store_id in APPLE_TW_STORE_NAMES:
-        candidates.extend(
-            [
-                {**base, "store": store_id},
-                {**base, "storeId": store_id},
-                {**base, "storeNumber": store_id},
-            ]
-        )
-    candidates.append({"parts.0": part_number, "postalCode": DEFAULT_PICKUP_LOCATION})
-    return candidates
 
 
 def extract_education_model_links(page_html: str) -> list[dict[str, str]]:
@@ -201,74 +173,31 @@ def extract_fulfillment_config(page_html: str) -> dict[str, Any]:
 
 
 def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
-    content: list[dict[str, Any]] = []
-    last_error: Exception | None = None
-    for params in pickup_query_candidates(part_number):
-        try:
-            payload = fetch_json(SBA_AVAILABILITY_URL, params)
-        except Exception as exc:
-            print(f"[debug] pickup query failed: {params} → {exc}", file=sys.stderr)
-            last_error = exc
-            continue
-        candidate_content = payload.get("body", {}).get("content") or []
-        print(f"[debug] pickup query params={list(params.keys())} content_len={len(candidate_content)}", file=sys.stderr)
-        if candidate_content:
-            import json as _json
-            print(f"[debug] first entry: {_json.dumps(candidate_content[0], ensure_ascii=False)}", file=sys.stderr)
-        if not candidate_content:
-            continue
-        content = candidate_content
-        availability = candidate_content[0]
-        if availability.get("availableAtAnyStore") or availability.get("pickupMessage"):
-            break
-
-    if not content:
-        if last_error:
-            raise last_error
-        return []
-
-    availability = content[0]
-    pickup_message = availability.get("pickupMessage") or {}
-    detailed_store_id = pickup_message.get("storeId") or availability.get("storeId") or ""
-    eligible_store_ids = split_store_ids(availability.get("eligibleStores"))
-
-    if not eligible_store_ids and detailed_store_id:
-        eligible_store_ids = [detailed_store_id]
-
-    if not availability.get("availableAtAnyStore") and not eligible_store_ids:
-        return [
-            {
-                "store_id": "",
-                "store": "Apple 直營店取貨",
-                "eligible": "false",
-                "pickup": "目前沒有可取貨門市",
-            }
-        ]
-
-    pickup_quote = strip_markup(
-        pickup_message.get("pickupSearchQuote") or pickup_message.get("storePickupQuote")
-    )
-    if not pickup_quote:
-        pickup_quote = strip_markup(availability.get("availableMessageLink")) or "可取貨"
-
-    detailed_store_name = (
-        normalize_text((pickup_message.get("address") or {}).get("address", ""))
-        or APPLE_TW_STORE_NAMES.get(detailed_store_id, "")
-    )
+    payload = fetch_json(RETAIL_PICKUP_URL, {
+        "parts.0": part_number,
+        "location": DEFAULT_PICKUP_LOCATION,
+        "searchNearby": "true",
+    })
+    stores = payload.get("body", {}).get("stores") or []
     entries: list[dict[str, str]] = []
-    for store_id in eligible_store_ids:
-        store_name = APPLE_TW_STORE_NAMES.get(store_id, store_id)
-        if store_id == detailed_store_id and detailed_store_name:
-            store_name = detailed_store_name
-        entries.append(
-            {
-                "store_id": store_id,
-                "store": store_name,
-                "eligible": "true",
-                "pickup": pickup_quote,
-            }
+    for store in stores:
+        store_number = store.get("storeNumber", "")
+        if store_number not in APPLE_TW_STORE_NAMES:
+            continue
+        part_avail = (store.get("partsAvailability") or {}).get(part_number, {})
+        if part_avail.get("pickupDisplay") != "available":
+            continue
+        pickup_quote = (
+            strip_markup(part_avail.get("storePickupQuote"))
+            or strip_markup(part_avail.get("pickupSearchQuote"))
+            or "可取貨"
         )
-
+        entries.append({
+            "store_id": store_number,
+            "store": APPLE_TW_STORE_NAMES[store_number],
+            "eligible": "true",
+            "pickup": pickup_quote,
+        })
     return entries
 
 
