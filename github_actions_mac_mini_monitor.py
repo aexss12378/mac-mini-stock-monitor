@@ -185,7 +185,7 @@ def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
         if store_number not in APPLE_TW_STORE_NAMES:
             continue
         part_avail = (store.get("partsAvailability") or {}).get(part_number, {})
-        if part_avail.get("pickupDisplay") != "available":
+        if part_avail.get("pickupDisplay") not in {"available", "ships-to-store"}:
             continue
         pickup_quote = (
             strip_markup(part_avail.get("storePickupQuote"))
