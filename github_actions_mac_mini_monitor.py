@@ -187,6 +187,7 @@ def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
         part_avail = (store.get("partsAvailability") or {}).get(part_number, {})
         if part_avail.get("pickupDisplay") not in {"available", "ships-to-store"}:
             continue
+        pickup_display = part_avail.get("pickupDisplay", "")
         pickup_quote = (
             strip_markup(part_avail.get("storePickupQuote"))
             or strip_markup(part_avail.get("pickupSearchQuote"))
@@ -196,6 +197,7 @@ def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
             "store_id": store_number,
             "store": APPLE_TW_STORE_NAMES[store_number],
             "eligible": "true",
+            "pickup_display": pickup_display,
             "pickup": pickup_quote,
         })
     return entries
@@ -268,7 +270,8 @@ def build_email_body(refurbished: dict[str, Any], education_models: list[dict[st
         lines.append(f"  商品頁：{model['url']}")
         if model.get("pickup_entries"):
             for pickup_entry in model["pickup_entries"]:
-                lines.append(f"  {pickup_entry['store']}：{pickup_entry['pickup']}")
+                label = "立即取貨" if pickup_entry.get("pickup_display") == "available" else "訂購後到店取貨"
+                lines.append(f"  {pickup_entry['store']}：{label}，{pickup_entry['pickup']}")
         elif model.get("pickup_error"):
             lines.append(f"  {model['pickup_error']}")
         else:
