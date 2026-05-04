@@ -10,7 +10,7 @@
 - Apple 台灣教育優惠 Mac mini：`https://www.apple.com/tw-edu/shop/buy-mac/mac-mini`
 - 目標記憶體：`16GB`、`24GB`
 - 排除：`M4 Pro`
-- 通知內容：型號、售價、商品頁、Apple 直營店取貨資訊
+- 通知內容：型號、售價、商品頁、Apple 直營店取貨資訊（含「立即取貨」與「訂購後宅配到店」兩種狀態）
 - 目前門市名稱對照：Apple 台北 101、Apple 信義 A13
 
 整修品頁有商品不代表一定會通知。程式只把符合目標條件的 Mac mini 整修品算成現貨；如果頁面上只有 iMac、MacBook 或其他不符合條件的商品，通知裡會顯示沒有符合條件的整修品現貨。
@@ -128,7 +128,11 @@ APPLE_TW_STORE_NAMES = {
 
 ### Apple 直營店取貨資料空白
 
-先看 GitHub Actions 日誌。如果教育優惠商品和價格都有出現，但店取資料空白，常見原因是 Apple 修改取貨接口、地點資訊失效，或新增了不同的門市回傳格式。
+先看 GitHub Actions 日誌。如果教育優惠商品和價格都有出現，但店取資料空白，常見原因是：
+
+- Apple 修改了 `retail/pickup-message` API 的回傳格式或欄位名稱
+- `pickupDisplay` 出現了程式未處理的新值（目前處理 `available` 與 `ships-to-store`）
+- `APPLE_TW_STORE_NAMES` 裡的門市代號（`R694`、`R713`）已過期
 
 ### 沒收到信
 
@@ -157,27 +161,27 @@ EMAIL_TO
 
 ## 問題解決紀錄
 
-### 原始問題
+### 門市資訊顯示「目前無法取得資料」
 
-自己用瀏覽器開 Apple 網頁，可以看到哪間門市有現貨、可以取貨。但同樣的程式跑在 GitHub Actions 上，卻顯示「目前無法取得資料」或完全沒有門市資訊。
+**問題**：GitHub Actions 寄出通知，但信件裡門市取貨欄位顯示「Apple 直營店取貨：目前無法取得資料」，而實際上門市是可以訂購的。
 
-### 原因
+**原因**：Apple 的 `retail/pickup-message` API 有兩種有貨狀態：
+- `available`：門市現有庫存，今天就能取
+- `ships-to-store`：訂購後宅配到門市，需等待幾天
 
-Apple 的門市取貨資訊不是直接寫在頁面上，而是瀏覽器在背後自動帶著「我在台灣、我要查這個商品、我在這個郵遞區號附近」這些條件去問 Apple 伺服器才拿到的。瀏覽器會自動處理這些，但 GitHub Actions 跑在雲端伺服器上，什麼都沒有，Apple 就不回傳門市資料。
+程式原本只認 `available`，遇到 `ships-to-store` 就跳過，導致信件顯示「目前無法取得資料」。
 
-舊版程式查的是一個叫 `fulfillment-messages` 的 API，這個在瀏覽器裡可以通，在雲端就行不通。
+**修法**：在 `collect_pickup_entries()` 將過濾條件改為同時接受 `available` 與 `ships-to-store`，並顯示對應的供貨日期。
 
-### 修法
+---
 
-改成讓程式自己帶齊 Apple 需要的資訊：
+### GitHub Actions 無法取得門市資料（舊問題）
 
-1. 從教育優惠頁抓出符合條件的商品連結。
-2. 進到商品頁，取得這個商品的實際料號（`partNumber`）。
-3. 用料號去問另一個 API（`sba/availability-message`），這個不需要瀏覽器狀態。
-4. 查詢時帶入台灣的地區代碼和郵遞區號。
-5. 再對幾個已知的 Apple 台灣門市代號做備援查詢。
+**問題**：本機可以看到門市現貨，但 GitHub Actions 完全沒有門市資訊。
 
-改完之後，GitHub Actions 就能正確列出 Apple 台北 101、Apple 信義 A13 的取貨狀況、售價與供貨日期。
+**原因**：早期版本查的是需要瀏覽器 session 的 API，在雲端環境無法通過驗證。
+
+**修法**：改用 `retail/pickup-message` API，帶入料號（`partNumber`）與郵遞區號即可查詢，不需要瀏覽器 session。料號從教育優惠商品頁的內嵌 metrics JSON 取得。
 
 ### 通知邏輯
 
