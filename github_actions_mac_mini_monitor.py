@@ -213,8 +213,8 @@ def collect_pickup_entries(part_number: str) -> list[dict[str, str]]:
         candidate_content = payload.get("body", {}).get("content") or []
         print(f"[debug] pickup query params={list(params.keys())} content_len={len(candidate_content)}", file=sys.stderr)
         if candidate_content:
-            print(f"[debug] first entry keys: {list(candidate_content[0].keys())}", file=sys.stderr)
-            print(f"[debug] availableAtAnyStore={candidate_content[0].get('availableAtAnyStore')} eligibleStores={candidate_content[0].get('eligibleStores')}", file=sys.stderr)
+            import json as _json
+            print(f"[debug] first entry: {_json.dumps(candidate_content[0], ensure_ascii=False)}", file=sys.stderr)
         if not candidate_content:
             continue
         content = candidate_content
